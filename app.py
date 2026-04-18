@@ -1,12 +1,19 @@
+import logging
+import sqlite3
+from pathlib import Path
+
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
-import sqlite3
 from werkzeug.security import generate_password_hash, check_password_hash
 from db import init_db
-from ai import analyze_issue
 
-app = Flask(__name__, static_folder="../frontend", static_url_path="")
+BASE_DIR = Path(__file__).resolve().parent
+FRONTEND_DIR = BASE_DIR.parent / "frontend"
+IMAGE_DIR = BASE_DIR.parent / "static" / "images"
+
+app = Flask(__name__, static_folder=str(FRONTEND_DIR), static_url_path="")
 CORS(app)
+logger = logging.getLogger(__name__)
 
 init_db()
 
@@ -34,33 +41,60 @@ try:
 except:
     pass
 
+
+def _serve_frontend_file(filename):
+    if FRONTEND_DIR.exists():
+        return send_from_directory(FRONTEND_DIR, filename)
+    return jsonify({
+        "message": "Backend is running, but frontend files are not deployed with this service."
+    }), 404
+
+
+def _analyze_issue(description):
+    try:
+        from ai import analyze_issue
+        return analyze_issue(description)
+    except Exception as exc:
+        logger.warning("AI analysis unavailable: %s", exc)
+        return "AI analysis processing..."
+
 # =========================
 # 📄 ROUTES
 # =========================
 
+@app.route('/health')
+def health():
+    return jsonify({"status": "ok"})
+
 @app.route('/')
 def home():
-    return send_from_directory("../frontend", "index.html")
+    if FRONTEND_DIR.exists():
+        return send_from_directory(FRONTEND_DIR, "index.html")
+    return jsonify({
+        "service": "smart-kolhapur-backend",
+        "status": "ok",
+        "message": "Backend is running."
+    })
 
 @app.route('/signup-page')
 def signup_page():
-    return send_from_directory("../frontend", "signup.html")
+    return _serve_frontend_file("signup.html")
 
 @app.route('/login-page')
 def login_page():
-    return send_from_directory("../frontend", "login.html")
+    return _serve_frontend_file("login.html")
 
 @app.route('/dashboard-page')
 def dashboard_page():
-    return send_from_directory("../frontend", "dashboard.html")
+    return _serve_frontend_file("dashboard.html")
 
 @app.route('/gov-dashboard')
 def gov_dashboard_page():
-    return send_from_directory("../frontend", "gov-dashboard.html")
+    return _serve_frontend_file("gov-dashboard.html")
 
 @app.route('/static/images/<path:filename>')
 def serve_images(filename):
-    return send_from_directory("../static/images", filename)
+    return send_from_directory(IMAGE_DIR, filename)
 
 # =========================
 # 🔐 AUTH
@@ -128,10 +162,7 @@ def report_issue():
     description = data.get("description")
     image_url = data.get("image")  # 🔥 added
 
-    try:
-        ai_analysis = analyze_issue(description)
-    except:
-        ai_analysis = "AI analysis processing..."
+    ai_analysis = _analyze_issue(description)
 
     conn = sqlite3.connect("users.db")
     c = conn.cursor()
